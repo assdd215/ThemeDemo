@@ -2,14 +2,21 @@ package com.luzeping.customthemedemo.skin
 
 import android.app.Application
 import android.content.Context
-import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.content.res.Resources
 import android.graphics.drawable.Drawable
 import android.os.AsyncTask
 import android.util.SparseArray
 import com.luzeping.customthemedemo.skin.app.SkinActivityLifecycle
+import com.luzeping.customthemedemo.skin.app.SkinLayoutInflater
+import com.luzeping.customthemedemo.skin.app.SkinWrapper
+import com.luzeping.customthemedemo.skin.loader.SkinAssetsLoader
+import com.luzeping.customthemedemo.skin.loader.SkinBuildInLoader
+import com.luzeping.customthemedemo.skin.loader.SkinNoneLoader
+import com.luzeping.customthemedemo.skin.loader.SkinPrefixBuildInLoader
+import com.luzeping.customthemedemo.skin.res.SkinCompatResources
 import com.luzeping.customthemedemo.skin.util.SkinPreference
-import java.lang.Exception
 
 class SkinCompatManager(context: Context) : SkinObservable() {
 
@@ -19,6 +26,9 @@ class SkinCompatManager(context: Context) : SkinObservable() {
     }
 
     private val mStrategyMap = SparseArray<SkinLoaderStrategy?>()
+    private val mWrappers = ArrayList<SkinWrapper>()
+    private val mInflaters = ArrayList<SkinLayoutInflater>()
+    private val mHookInflaters = ArrayList<SkinLayoutInflater>()
 
     private val mLock = Object()
 
@@ -27,10 +37,13 @@ class SkinCompatManager(context: Context) : SkinObservable() {
     companion object {
 
         const val SKIN_LOADER_STRATEGY_NONE = -1
+        const val SKIN_LOADER_STRATEGY_ASSETS = 0
+        const val SKIN_LOADER_STRATEGY_BUILD_IN = 1
+        const val SKIN_LOADER_STRATEGY_PREFIX_BUILD_IN = 2
 
         private var instance : SkinCompatManager? = null
 
-        fun getInstance() = instance
+        fun getInstance() = instance!!
 
         fun init(context: Context): SkinCompatManager {
             if (instance == null) {
@@ -50,7 +63,10 @@ class SkinCompatManager(context: Context) : SkinObservable() {
     }
 
     private fun initLoaderStrategy() {
-
+        mStrategyMap.put(SKIN_LOADER_STRATEGY_NONE, SkinNoneLoader())
+        mStrategyMap.put(SKIN_LOADER_STRATEGY_ASSETS, SkinAssetsLoader())
+        mStrategyMap.put(SKIN_LOADER_STRATEGY_BUILD_IN, SkinBuildInLoader())
+        mStrategyMap.put(SKIN_LOADER_STRATEGY_PREFIX_BUILD_IN, SkinPrefixBuildInLoader())
     }
 
     fun loadSkin() : AsyncTask<String, Any, String?>? {
@@ -71,6 +87,47 @@ class SkinCompatManager(context: Context) : SkinObservable() {
         return SkinLoaderTask(listener, loaderStrategy)
             .executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, skinName)
     }
+
+    fun getContext(): Context = mAppContext
+
+    fun getWrappers() = mWrappers
+
+    fun getInflaters() = mInflaters
+
+    fun getHookInflaters() = mHookInflaters
+
+    fun getSkinPackageName(skinPkgPath: String?): String {
+        val packageManager = mAppContext.packageManager
+        val info = packageManager.getPackageArchiveInfo(skinPkgPath ?: "", PackageManager.GET_ACTIVITIES)
+        return info?.packageName ?: ""
+    }
+
+    /**
+     * 获取皮肤包资源{@link Resources}.
+     *
+     * @param skinPkgPath sdcard中皮肤包路径.
+     * @return
+     */
+    fun getSkinResources(skinPkgPath: String?): Resources? {
+
+        try {
+
+            val packageInfo = mAppContext.packageManager.getPackageArchiveInfo(skinPkgPath ?:"", 0)
+            packageInfo!!.apply {
+                applicationInfo.sourceDir  = skinPkgPath
+                applicationInfo.publicSourceDir = skinPkgPath
+            }
+            val res = mAppContext.packageManager.getResourcesForApplication(packageInfo.applicationInfo)
+            val superRes = mAppContext.resources
+            return Resources(res.assets, superRes.displayMetrics, superRes.configuration)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return null
+
+    }
+
+
 
     private inner class SkinLoaderTask(val mListener: SkinLoaderListener?,
                                  val mStrategy: SkinLoaderStrategy)
@@ -99,7 +156,7 @@ class SkinCompatManager(context: Context) : SkinObservable() {
                 if (params.size == 1) {
                     val skinName = mStrategy.loadSkinInBackground(mAppContext, params[0])
                     if (skinName.isNullOrEmpty()) {
-                        //TODO SkinCompatResources.getInstance().reset(mStrategy);
+                        SkinCompatResources.getInstance().reset(mStrategy);
                         return ""
                     }
 
@@ -109,7 +166,7 @@ class SkinCompatManager(context: Context) : SkinObservable() {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-            //TODO SkinCompatResources.getInstance().reset();
+            SkinCompatResources.getInstance().reset();
             return null
         }
 
